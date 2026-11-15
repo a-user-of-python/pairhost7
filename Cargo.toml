@@ -1,0 +1,23 @@
+[package]
+name = "pairhost7"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "Jailbreak CLI that acts as an iOS 27 wireless pairing host and writes an RPPairing file"
+authors = ["user"]
+repository = "https://github.com/a-user-of-python/pairhost7"
+
+[dependencies]
+# Pinned to the exact idevice revision this code was written and checked
+# against. Only the remote_pairing feature is enabled: it is pure-Rust
+# crypto (SRP, Ed25519, X25519, ChaCha20-Poly1305) and pulls in no C
+# crypto cross-build. The crate still needs one TLS backend selected
+# for its session code to compile; "rustcrypto" is the pure-Rust
+# rustls provider, so the whole dependency tree stays Rust + libc and
+# cross-compiles cleanly for iOS (no aws-lc / ring / openssl C builds).
+idevice = { git = "https://github.com/jkcoxson/idevice", rev = "89702099f4d7552f704f93b4526756abda319ceb", default-features = false, features = ["remote_pairing", "rustcrypto"] }
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4.5" }
+mdns-sd = "0.19"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
