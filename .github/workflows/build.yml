@@ -36,14 +36,19 @@ jobs:
         run: |
           set -euo pipefail
           BIN=target/aarch64-apple-ios/release/pairhost7
-          file "$BIN"
-          file "$BIN" | grep -q "Mach-O 64-bit executable arm64"
+          # NOTE: do not pipe `strings`/`file` straight into `grep -q` or
+          # `head` here: with pipefail, the early-exiting reader makes the
+          # producer die with SIGPIPE and the step fails even when the
+          # check itself passed. Capture to files first, then grep.
+          file "$BIN" | tee /tmp/file_out.txt
+          grep -q "Mach-O 64-bit executable arm64" /tmp/file_out.txt
           echo "--- load commands (looking for iOS 15.0 minimum) ---"
           otool -l "$BIN" | grep -A3 -E "LC_BUILD_VERSION|LC_VERSION_MIN_IPHONEOS" || true
           echo "--- required strings ---"
-          strings "$BIN" | grep -F "_remotepairing-pairable-host" | head -2
-          strings "$BIN" | grep -q "_remotepairing-pairable-host"
-          strings "$BIN" | grep -q "Pair-Setup"
+          strings "$BIN" > /tmp/strings_out.txt
+          grep -F "_remotepairing-pairable-host" /tmp/strings_out.txt | head -2 || true
+          grep -q "_remotepairing-pairable-host" /tmp/strings_out.txt
+          grep -q "Pair-Setup" /tmp/strings_out.txt
           echo "binary verification passed"
 
       - name: Sign the binary (ldid preferred, ad-hoc codesign fallback)
