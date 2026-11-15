@@ -1,0 +1,85 @@
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install the iOS Rust target
+        run: |
+          set -euo pipefail
+          if ! command -v cargo >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup target add aarch64-apple-ios
+          rustc --version
+          cargo --version
+
+      - name: Build for aarch64-apple-ios (minimum iOS 15.0)
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+        run: |
+          set -euo pipefail
+          cargo build --release --target aarch64-apple-ios
+          ls -l target/aarch64-apple-ios/release/pairhost7
+
+      - name: Verify the binary is a real arm64 iOS Mach-O with the pairing code in it
+        run: |
+          set -euo pipefail
+          BIN=target/aarch64-apple-ios/release/pairhost7
+          file "$BIN"
+          file "$BIN" | grep -q "Mach-O 64-bit executable arm64"
+          echo "--- load commands (looking for iOS 15.0 minimum) ---"
+          otool -l "$BIN" | grep -A3 -E "LC_BUILD_VERSION|LC_VERSION_MIN_IPHONEOS" || true
+          echo "--- required strings ---"
+          strings "$BIN" | grep -F "_remotepairing-pairable-host" | head -2
+          strings "$BIN" | grep -q "_remotepairing-pairable-host"
+          strings "$BIN" | grep -q "Pair-Setup"
+          echo "binary verification passed"
+
+      - name: Sign the binary (ldid preferred, ad-hoc codesign fallback)
+        run: |
+          set -euo pipefail
+          BIN=target/aarch64-apple-ios/release/pairhost7
+          if brew install ldid >/dev/null 2>&1 && command -v ldid >/dev/null 2>&1; then
+            ldid -S "$BIN"
+            echo "signed with ldid"
+          else
+            echo "ldid unavailable, falling back to ad-hoc codesign"
+            codesign -s - -f "$BIN"
+            echo "signed with codesign (ad-hoc)"
+          fi
+          codesign -dv "$BIN" 2>&1 || true
+
+      - name: Package the rootless .deb
+        run: |
+          set -euo pipefail
+          python3 packaging/build_deb.py target/aarch64-apple-ios/release/pairhost7 PairHost7.deb 1.0
+          echo "--- deb members ---"
+          ar t PairHost7.deb
+          mkdir -p debcheck && cd debcheck
+          ar x ../PairHost7.deb
+          tar tzf control.tar.gz
+          tar tzf data.tar.gz
+          tar xzf data.tar.gz
+          file var/jb/usr/bin/pairhost7
+          test -x var/jb/usr/bin/pairhost7
+          echo "deb verification passed"
+
+      - name: Upload the .deb and the raw binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pairhost7
+          path: |
+            PairHost7.deb
+            target/aarch64-apple-ios/release/pairhost7
+          if-no-files-found: error
